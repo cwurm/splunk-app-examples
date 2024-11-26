@@ -60,6 +60,10 @@ services:
             - ./python/twitted/twitted:/opt/splunk/etc/apps/twitted
             - ./lib/splunklib:/opt/splunk/etc/apps/twitted/lib/splunklib
 
+            # ClickHouse Cloud Audit Logs
+            - ./modularinputs/python/clickhouse_cloud_audit_logs:/opt/splunk/etc/apps/clickhouse_cloud_audit_logs
+            - ./lib/splunklib:/opt/splunk/etc/apps/clickhouse_cloud_audit_logs/lib/splunklib
+
         healthcheck:
             test: ['CMD', 'curl', '-f', 'http://localhost:8000']
             interval: 5s

@@ -26,7 +26,7 @@ init:
 .PHONY: up
 up:
 	@echo "$(ATTN_COLOR)==> up $(NO_COLOR)"
-	@pip install -r requirements.txt -t lib --upgrade
+	@pip3 install -r requirements.txt -t lib --upgrade
 	@docker-compose up -d
 
 .PHONY: remove
