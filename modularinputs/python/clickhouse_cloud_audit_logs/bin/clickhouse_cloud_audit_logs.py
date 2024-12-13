@@ -24,6 +24,7 @@ import sys
 import urllib.parse
 import logging
 
+
 # NOTE: splunklib must exist within clickhouse_cloud_audit_logs/lib/splunklib for this
 # example to run! To run this locally use SPLUNK_VERSION=latest docker compose up -d
 # from the root of this repo which mounts this example and the latest splunklib
@@ -31,6 +32,7 @@ import logging
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 from splunklib.modularinput import *
+import splunklib.client as client
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -38,6 +40,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 # Constants
 HOSTNAME = "api.clickhouse.cloud"
 BASE_URL = f"https://{HOSTNAME}/v1/organizations"
+MASK = "<encrypted>"
 
 class ClickHouseCloudAuditLogsScript(Script):
     def get_scheme(self):
@@ -72,8 +75,10 @@ class ClickHouseCloudAuditLogsScript(Script):
             title="API key secret",
             data_type=Argument.data_type_string,
             description="API key secret for the specified API key ID.",
-            required_on_create=True
+            required_on_create=True,
+            required_on_edit=False
         ))
+
 
         return scheme
 
@@ -82,6 +87,14 @@ class ClickHouseCloudAuditLogsScript(Script):
         api_key_id = validation_definition.parameters["api_key_id"]
         api_key_secret = validation_definition.parameters["api_key_secret"]
 
+        session_key = validation_definition.metadata['session_key']
+        args = {'token':session_key}
+        service = client.connect(**args)
+
+        if api_key_secret == MASK:
+            for storage_password in service.storage_passwords:
+                if storage_password.username == api_key_id:
+                    api_key_secret = storage_password.content.clear_password
         try:
             # To verify, we just check with the current time, we do not care about the data
             from_date = datetime.datetime.utcnow()
@@ -90,6 +103,40 @@ class ClickHouseCloudAuditLogsScript(Script):
             _get_activities(organization, api_key_id, api_key_secret, from_date)
         except Exception as e:
             raise ValueError(f"Validation failed: {str(e)}")
+        
+    def encrypt_password(self, api_key_id, api_key_secret):
+
+        try:
+            for storage_password in self.service.storage_passwords:
+                if storage_password.username == api_key_id:
+                    self.service.storage_passwords.delete(username=storage_password.username)
+                    break
+ 
+            self.service.storage_passwords.create(api_key_secret, api_key_id)
+ 
+        except Exception as e:
+            raise Exception("An error occurred updating credentials. Please ensure your user account has admin_all_objects and/or list_storage_passwords capabilities. Details: %s" % str(e))    
+
+    def mask_password(self, organization, api_key_id, input_name):
+        try:
+
+            kind, name = input_name.split("://")
+            item = self.service.inputs.__getitem__((name, kind))
+           
+            kwargs = {
+                "organization": organization,
+                "api_key_id": api_key_id,
+                "api_key_secret": MASK
+            }
+            item.update(**kwargs).refresh()
+           
+        except Exception as e:
+            raise Exception("Error updating inputs.conf: %s" % str(e))
+    
+    def get_password(self, api_key_id):
+        for storage_password in self.service.storage_passwords:
+            if storage_password.username == api_key_id:
+                return storage_password.content.clear_password
 
     def stream_events(self, inputs, event_writer):
         for input_name, input_item in list(inputs.inputs.items()):
@@ -102,7 +149,10 @@ class ClickHouseCloudAuditLogsScript(Script):
             checkpoint_data = _read_checkpoint(checkpoint_file_path)
 
             try:
-                activities = _get_activities(organization, api_key_id, api_key_secret)
+                if api_key_secret != MASK:
+                    self.encrypt_password(api_key_id, api_key_secret)
+                    self.mask_password(organization,api_key_id, input_name)
+                activities = _get_activities(organization, api_key_id, self.get_password(api_key_id))
                 new_checkpoint_data = ""
 
                 for activity in activities["result"]:
