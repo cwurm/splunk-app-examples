@@ -168,7 +168,6 @@ class ClickHouseCloudAuditLogsScript(Script):
 def _stream_event(event_writer, input_name, organization, activity):
     event = Event(
         stanza=input_name,
-        sourcetype="clickhouse_cloud_audit_logs",
         data=json.dumps(activity),
         source=f"{BASE_URL}/{organization}/activities",
         time=datetime.datetime.strptime(activity["createdAt"], '%Y-%m-%dT%H:%M:%S%z').strftime('%s.000')
